@@ -1,6 +1,6 @@
-# injects a tweak deb (e.g. spoti.pw) into your decrypted Spotify IPA with pyzule-rw.
-# nothing is compiled, so it runs on Linux in about a minute.
-name: Build IPA from your own Spotify IPA and a tweak deb
+# Patches your decrypted Spotify IPA with a release's kit, the way chroma.pw/patch does in a browser.
+# Nothing is compiled, so it runs on Linux in about a minute.
+name: Build IPA from your own Spotify IPA and a custom kit
 
 on:
   workflow_dispatch:
@@ -9,8 +9,8 @@ on:
         description: "Direct link to a decrypted Spotify IPA"
         required: true
         type: string
-      deb_url:
-        description: "Direct link to the tweak .deb to inject"
+      kit_url:
+        description: "Direct link to a custom kit .zip"
         required: true
         type: string
       upload_method:
@@ -30,38 +30,36 @@ jobs:
         with:
           exclude_inputs: upload_method
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v7
         with:
-          python-version: "3.12"
+          node-version: 24
 
-      - name: Download IPA and deb
+      - name: Download IPA
         env:
           IPA_URL: ${{ inputs.ipa_url }}
-          DEB_URL: ${{ inputs.deb_url }}
+        run: curl -fsSL --retry 3 -o spotify.ipa "$IPA_URL"
+
+      - name: Download the kit and patcher
+        env:
+          KIT_URL: ${{ inputs.kit_url }}
         run: |
-          curl -fsSL --retry 3 -o spotify.ipa "$IPA_URL"
-          curl -fsSL --retry 3 -o tweak.deb "$DEB_URL"
-          dpkg-deb -c tweak.deb
+          curl -fsSL --retry 3 -o kit.zip "$KIT_URL"
+          curl -fsSL --retry 3 -o patcher.mjs https://chroma.pw/patcher.mjs
 
-      - name: Install pyzule-rw
-        run: pip install --force-reinstall https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+      - name: Patch
+        run: node patcher.mjs spotify.ipa kit.zip out
 
-      - name: Inject the tweak
-        run: |
-          mkdir out
-          cyan -i spotify.ipa -o out/Spotify-patched.ipa -f tweak.deb
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.upload_method != 'filebin'
         with:
-          name: Spotify-patched
           path: out/*.ipa
+          archive: false
           if-no-files-found: error
 
       - name: Upload to filebin.net
         if: inputs.upload_method != 'artifacts'
         run: |
-          BIN="spotify-${{ github.run_id }}"
+          BIN="chroma-${{ github.run_id }}"
           echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
           for f in out/*.ipa; do
             curl -fsS -X POST -H "Content-Type: application/octet-stream" --data-binary "@$f" "https://filebin.net/$BIN/$(basename "$f")" >/dev/null
